@@ -1,0 +1,39 @@
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.4.0
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: make setup
+      - run: make check
+
+  live:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.4.0
+      - uses: actions/setup-java@v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: temporalio/setup-temporal@v0.1.0
+      - run: make setup
+      - run: make check-live

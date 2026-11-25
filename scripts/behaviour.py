@@ -1,0 +1,102 @@
+"""Behaviour checks: solutions pass, exercises fail on a TODO, overlay passes.
+With --live also runs the Worker and starter of each solution (needs the dev server).
+Standard library only. Exit code 1 if any row fails."""
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LANGS = ("python", "java")
+rows: list[tuple[str, str, str]] = []
+
+
+def test_cmd(lang: str, d: Path) -> list[str]:
+    if lang == "python":
+        return ["uv", "run", "--project", str(ROOT / "python"), "pytest", "-q", "-x", str(d)]
+    return ["mvn", "-q", "-f", str(d / "pom.xml"), "test"]
+
+
+def run(lang: str, d: Path) -> tuple[int, str]:
+    p = subprocess.run(test_cmd(lang, d), capture_output=True, text=True, cwd=d)
+    return p.returncode, p.stdout + p.stderr
+
+
+def record(name: str, ok: bool, note: str = "") -> None:
+    rows.append((name, "ok" if ok else "FAIL", note))
+
+
+def pairs(lang: str):
+    for ex in sorted((ROOT / lang).glob("exercise_[0-9][0-9]_*")):
+        so = ROOT / lang / ex.name.replace("exercise_", "solution_", 1)
+        if so.is_dir():
+            yield ex, so
+
+
+def ignore(_dir, names):
+    return [n for n in names if n in {".venv", "target", "__pycache__", ".pytest_cache"}]
+
+
+def behaviour() -> None:
+    for lang in LANGS:
+        for ex, so in pairs(lang):
+            code, _ = run(lang, so)
+            record(f"{lang}/{so.name}: solution passes", code == 0)
+            code, out = run(lang, ex)
+            failed_on_todo = code != 0 and "TODO" in out
+            record(f"{lang}/{ex.name}: fails on a TODO", failed_on_todo,
+                   "" if failed_on_todo else ("passed unexpectedly" if code == 0 else "failed, but not on a TODO"))
+            with tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp) / ex.name
+                shutil.copytree(ex, work, ignore=ignore)
+                for item in so.iterdir():
+                    if item.name in {".venv", "target", "__pycache__", ".pytest_cache"}:
+                        continue
+                    dest = work / item.name
+                    if dest.exists():
+                        shutil.rmtree(dest) if dest.is_dir() else dest.unlink()
+                    shutil.copytree(item, dest, ignore=ignore) if item.is_dir() else shutil.copy2(item, dest)
+                code, _ = run(lang, work)
+            record(f"{lang}/{ex.name}: overlay passes", code == 0)
+
+
+def live() -> None:
+    table = json.loads((ROOT / "scripts" / "live.json").read_text())
+    for item in table:
+        d = ROOT / item["dir"]
+        started = []
+        try:
+            for cmd in item["workers"]:
+                started.append(subprocess.Popen(cmd, shell=True, cwd=d, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+            time.sleep(item.get("wait", 6))
+            p = subprocess.run(item["starter"], shell=True, cwd=d, capture_output=True, text=True, timeout=120)
+            ok = item["expect"] in p.stdout
+            record(f"live {item['dir']}", ok, "" if ok else f"expected '{item['expect']}'")
+        finally:
+            for proc in started:
+                proc.terminate()
+            for proc in started:
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+
+
+def main() -> int:
+    behaviour()
+    if "--live" in sys.argv:
+        live()
+    width = max((len(r[0]) for r in rows), default=10)
+    print(f"behaviour: {len(rows)} check(s)")
+    for name, status, note in rows:
+        print(f"  {status:4} {name:<{width}} {note}")
+    bad = [r for r in rows if r[1] != "ok"]
+    print("behaviour: " + ("FAILED" if bad else "OK"))
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

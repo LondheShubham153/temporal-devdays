@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+target/
+build/
+.gradle/
+.idea/
+.vscode/
+.DS_Store
+*.log
+.env
