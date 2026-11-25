@@ -2,6 +2,7 @@
 With --live also runs the Worker and starter of each solution (needs the dev server).
 Standard library only. Exit code 1 if any row fails."""
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -16,7 +17,8 @@ rows: list[tuple[str, str, str]] = []
 
 def test_cmd(lang: str, d: Path) -> list[str]:
     if lang == "python":
-        return ["uv", "run", "--project", str(ROOT / "python"), "pytest", "-q", "-x", str(d)]
+        return ["uv", "run", "--project", str(ROOT / "python"), "pytest", "-q", "-x",
+                "-c", str(ROOT / "python" / "pyproject.toml"), "--rootdir", str(d), str(d)]
     return ["mvn", "-q", "-f", str(d / "pom.xml"), "test"]
 
 
@@ -30,10 +32,10 @@ def record(name: str, ok: bool, note: str = "") -> None:
 
 
 def pairs(lang: str):
-    for ex in sorted((ROOT / lang).glob("exercise_[0-9][0-9]_*")):
-        so = ROOT / lang / ex.name.replace("exercise_", "solution_", 1)
-        if so.is_dir():
-            yield ex, so
+    for topic in sorted((ROOT / lang).glob("[0-9][0-9]_*")):
+        ex, so = topic / "exercise", topic / "solution"
+        if ex.is_dir() and so.is_dir():
+            yield topic.name, ex, so
 
 
 def ignore(_dir, names):
@@ -42,13 +44,14 @@ def ignore(_dir, names):
 
 def behaviour() -> None:
     for lang in LANGS:
-        for ex, so in pairs(lang):
+        for topic, ex, so in pairs(lang):
             code, _ = run(lang, so)
-            record(f"{lang}/{so.name}: solution passes", code == 0)
+            record(f"{lang}/{topic}: solution passes", code == 0)
             code, out = run(lang, ex)
-            failed_on_todo = code != 0 and "TODO" in out
-            record(f"{lang}/{ex.name}: fails on a TODO", failed_on_todo,
-                   "" if failed_on_todo else ("passed unexpectedly" if code == 0 else "failed, but not on a TODO"))
+            broken = any(w in out for w in ("SyntaxError", "COMPILATION ERROR", "ImportError", "ModuleNotFoundError"))
+            failed_on_todo = code != 0 and "TODO" in out and not broken
+            record(f"{lang}/{topic}: exercise fails on a TODO", failed_on_todo,
+                   "" if failed_on_todo else ("passed unexpectedly" if code == 0 else ("failed on a syntax, compile or import error" if broken else "failed, but not on a TODO")))
             with tempfile.TemporaryDirectory() as tmp:
                 work = Path(tmp) / ex.name
                 shutil.copytree(ex, work, ignore=ignore)
@@ -60,7 +63,7 @@ def behaviour() -> None:
                         shutil.rmtree(dest) if dest.is_dir() else dest.unlink()
                     shutil.copytree(item, dest, ignore=ignore) if item.is_dir() else shutil.copy2(item, dest)
                 code, _ = run(lang, work)
-            record(f"{lang}/{ex.name}: overlay passes", code == 0)
+            record(f"{lang}/{topic}: overlay passes", code == 0)
 
 
 def live() -> None:
@@ -70,11 +73,13 @@ def live() -> None:
         started = []
         try:
             for cmd in item["workers"]:
-                started.append(subprocess.Popen(cmd, shell=True, cwd=d, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+                started.append(subprocess.Popen(shlex.split(cmd), cwd=d, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
             time.sleep(item.get("wait", 6))
-            p = subprocess.run(item["starter"], shell=True, cwd=d, capture_output=True, text=True, timeout=120)
+            p = subprocess.run(shlex.split(item["starter"]), cwd=d, capture_output=True, text=True, timeout=180)
             ok = item["expect"] in p.stdout
             record(f"live {item['dir']}", ok, "" if ok else f"expected '{item['expect']}'")
+        except Exception as err:  # a failed live run must not stop the other rows
+            record(f"live {item['dir']}", False, str(err)[:80])
         finally:
             for proc in started:
                 proc.terminate()
@@ -83,6 +88,8 @@ def live() -> None:
                     proc.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+            for cmd in item.get("cleanup", []):
+                subprocess.run(shlex.split(cmd), capture_output=True)
 
 
 def main() -> int:
