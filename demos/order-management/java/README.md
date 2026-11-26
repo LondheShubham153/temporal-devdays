@@ -1,0 +1,64 @@
+# Order management: Java services
+
+The same four services and the same web app as the [Python version](../python), written in Java 21. Read the [demo README](../README.md) first for the architecture. You need no Python here.
+
+## Services
+
+| Service | Task queue | Classes |
+|---|---|---|
+| orders | `orders` | `OrderWorkflow`, `ShipmentWorkflow` |
+| inventory | `inventory` | `InventoryActivities` |
+| payments | `payments` | `PaymentActivities`: `charge`, `refund_charge` |
+| shipping | `shipping` | `ShippingActivities` |
+| web app | none | `WebApp`: starts orders and sends the Signal, Update and Query, on port 5050 |
+
+Each Activity interface has an `Impl` class next to it. Names such as `check_stock`, `charge` and `change_address` are set explicitly, so the Java services work with the Python ones.
+
+## Run
+
+You need Java 21, Maven and the [Temporal CLI](https://docs.temporal.io/cli). Run these from `demos/order-management/java`.
+
+```bash
+temporal server start-dev                                  # terminal 1
+mvn -q compile exec:java@app                               # terminal 2, open http://localhost:5050
+```
+
+Then the services, in the terminal you prefer:
+
+```bash
+mvn -q compile exec:java@worker                            # all four services in one process
+mvn -q compile exec:java@worker -Dexec.args="payments"     # only payments
+mvn -q compile exec:java@worker -Dexec.args="orders inventory payments shipping"
+```
+
+One Worker per queue. If a Python service already runs a queue, do not start the same one here.
+
+To run every service in its own terminal, use one command per terminal:
+
+```bash
+mvn -q compile exec:java@worker -Dexec.args="orders"       # terminal 3
+mvn -q compile exec:java@worker -Dexec.args="inventory"    # terminal 4
+mvn -q compile exec:java@worker -Dexec.args="payments"     # terminal 5
+mvn -q compile exec:java@worker -Dexec.args="shipping"     # terminal 6
+```
+
+## Test
+
+No server needed.
+
+```bash
+mvn -q test
+```
+
+Eleven tests. Eight cover the scenarios: happy path, flaky card, bad card, shipping fails, approval Signal, approval timeout, address Update and a rejected address. Three cover the web app: the page, a happy order and the approval flow.
+
+## Where to look
+
+- `WebApp.java`: the web app, using only the JDK's HTTP server. `src/main/resources/index.html` is a copy of the Python app's page, and a test fails if they differ
+- `WorkerApp.java`: which queue gets which service, and the `main` that starts them
+- `OrderWorkflowImpl.java`: the order steps, Saga undo, Signal, Update and Query
+- `ShipmentWorkflowImpl.java`: ships every item in parallel
+- `Models.java`: the inputs and outputs, with the JSON field names the Python app uses
+- `OrderTest.java`: the tests
+
+If you change the code, stop and restart the Worker. If you change the page, change `python/templates/index.html` and copy it to `src/main/resources/index.html`.
