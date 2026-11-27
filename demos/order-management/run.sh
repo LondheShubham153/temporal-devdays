@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run the order demo: the Temporal dev server, four services (one process each) and the web app.
-# Usage: ./run.sh python | java | mixed | status | stop <service> | start <service> [python|java] | logs | smoke | down
+# Usage: ./run.sh python | java | mixed | status | stop <service> | start <service> [python|java] | stop workers | start workers | logs | smoke | down
 set -u
 cd "$(dirname "$0")"
 ROOT=$(pwd)
@@ -65,7 +65,7 @@ run_all() {  # a language for each service, then the app
   ensure_temporal
   case $1 in python | mixed) command -v uv > /dev/null || { echo "uv is needed"; exit 1; } ;; esac
   case $1 in java | mixed) (cd java && mvn -q compile) || exit 1 ;; esac
-  lsof -ti:5050 > /dev/null 2>&1 && ! alive app && { echo "port 5050 is in use by another program"; exit 1; }
+  lsof -ti:5050 -sTCP:LISTEN > /dev/null 2>&1 && ! alive app && { echo "port 5050 is in use by another program"; exit 1; }
   for s in $SERVICES; do
     lang=$1
     if [ "$1" = mixed ]; then if [ "$s" = payments ]; then lang=java; else lang=python; fi; fi
@@ -78,12 +78,20 @@ run_all() {  # a language for each service, then the app
 case ${1:-help} in
   python | java | mixed) run_all "$1" ;;
   start)
-    [ -n "${2:-}" ] || { echo "usage: ./run.sh start <service> [python|java]"; exit 1; }
+    [ -n "${2:-}" ] || { echo "usage: ./run.sh start <service|workers> [python|java]"; exit 1; }
     ensure_temporal
+    if [ "$2" = workers ]; then   # every service, each in the language it had before
+      for s in $SERVICES; do start_service "$s" "${3:-$(cat "$RUN/$s.lang" 2> /dev/null || echo python)}"; done
+      exit 0
+    fi
     [ "${3:-}" = java ] && (cd java && mvn -q compile)
     start_service "$2" "${3:-python}" ;;
   stop)
-    [ -n "${2:-}" ] || { echo "usage: ./run.sh stop <service>"; exit 1; }
+    [ -n "${2:-}" ] || { echo "usage: ./run.sh stop <service|workers>"; exit 1; }
+    if [ "$2" = workers ]; then   # all four services, the web app and the Temporal server stay up
+      for s in $SERVICES; do alive "$s" && { kill_tree "$(cat "$RUN/$s.pid")"; rm -f "$RUN/$s.pid"; echo "stopped $s"; }; done
+      exit 0
+    fi
     if alive "$2"; then kill_tree "$(cat "$RUN/$2.pid")"; rm -f "$RUN/$2.pid"; echo "stopped $2"; else echo "$2 is not running"; fi ;;
   status)
     for n in $SERVICES app; do

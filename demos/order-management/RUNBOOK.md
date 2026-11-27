@@ -22,6 +22,7 @@ cd demos/order-management
 ```
 
 - Open the demo at http://localhost:5050 and the Temporal Web UI at http://localhost:8233, side by side.
+- Pick **Demo** pace (the default). Steps then take a couple of seconds each, so you can talk over them. **Slow** is for a quiet room, **Fast** is for testing.
 - The four chips at the top should be green, each with a **PY** or **JAVA** badge.
 - Keep a terminal open for `./run.sh stop payments` and `./run.sh start payments`.
 - After a run: `./run.sh down`. It stops only what it started.
@@ -76,7 +77,17 @@ This is the strongest beat.
 - **Click:** *too short (rejected)* then Change: the Update is rejected. Then *99 Long Road, Pune* and Change: accepted. Then Approve.
 - **Watch:** the countdown, the *update* and *signal* chips, then the order ships to the new address.
 
-## Beat 7: Python and Java together (1 minute)
+## Beat 7: a Timer that survives (2 minutes)
+
+- **Click:** Approval times out, then Place order. Do not click Approve.
+- **Watch:** the countdown ("times out in 0:20").
+- **Do:** `./run.sh stop workers` while it counts down. The page shows the chips go red when work is waiting.
+- **Say:** "No Worker is running now. The Timer lives in Temporal, not in a process, so it keeps counting."
+- **Do:** wait for the countdown to reach zero, then `./run.sh start workers`.
+- **Watch:** the order cancels at once and `release_stock` runs: the Timer fired while everything was down.
+- **For proof:** in the Web UI the history has `TimerStarted` and `TimerFired`, and the fire time is the original one.
+
+## Beat 8: Python and Java together (1 minute)
 
 - **Do:** `./run.sh stop payments` then `./run.sh start payments java`
 - **Click:** Happy path, then Place order.

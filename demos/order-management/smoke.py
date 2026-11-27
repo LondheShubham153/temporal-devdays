@@ -20,8 +20,8 @@ def call(path, body=None):
         return json.loads(reply.read())
 
 
-def place(scenario):
-    return call("/start", {"scenario": scenario, "address": "12 Main Street"})["order_id"]
+def place(scenario, pace=0):
+    return call("/start", {"scenario": scenario, "pace": pace, "address": "12 Main Street"})["order_id"]
 
 
 def wait(order, until, seconds=60):
@@ -88,8 +88,17 @@ def scenarios():
     check("approval, address Update and Signal complete the order",
           names(d, kind="update") == ["change_address"] and names(d, kind="signal") == ["approve"] and d["countdown_ends"] is None, d)
 
+    d = wait(place("approval_timeout"), completed, 30)
+    check("approval timeout: the Timer fires, undo runs, nothing is charged",
+          names(d, undo=True) == ["release_stock"] and "charge" not in names(d, kind="activity"), d)
+
+    began = time.time()
+    d = wait(place("happy", 0.3), completed)
+    took = time.time() - began
+    check("pace slows an order down but it still ships", 3 < took < 20 and names(d, kind="activity") == ["check_stock", "reserve_stock", "charge"], f"took {took:.1f}s {d}")
+
     recent = call("/orders")
-    check("recent orders list scenarios", {"happy", "flaky_card", "bad_card", "ship_fails", "approval"} <= {o["scenario"] for o in recent}, recent)
+    check("recent orders list scenarios", {"happy", "flaky_card", "bad_card", "ship_fails", "approval", "approval_timeout"} <= {o["scenario"] for o in recent}, recent)
 
 
 def chaos():

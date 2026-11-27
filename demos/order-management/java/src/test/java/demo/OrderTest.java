@@ -34,10 +34,14 @@ class OrderTest {
     }
 
     OrderWorkflow start(String scenario) {
+        return start(scenario, 0);
+    }
+
+    OrderWorkflow start(String scenario, double pace) {
         OrderWorkflow wf = client.newWorkflowStub(OrderWorkflow.class,
             WorkflowOptions.newBuilder().setTaskQueue(WorkerApp.TASK_QUEUE)
                 .setWorkflowId("order-" + UUID.randomUUID()).build());
-        WorkflowClient.start(wf::run, new OrderInput("1", "1 Main St, Redwood", scenario));
+        WorkflowClient.start(wf::run, new OrderInput("1", "1 Main St, Redwood", scenario, pace));
         return wf;
     }
 
@@ -129,5 +133,29 @@ class OrderTest {
         waitForStep(wf, "waiting for approval");
         assertThrows(WorkflowUpdateException.class, () -> wf.changeAddress("x"));
         assertEquals("1 Main St, Redwood", wf.status().address());
+    }
+
+    @Test
+    void timeoutScenarioCancelsAfterAFewSeconds() {
+        OrderOutput out = result(start("approval_timeout"));
+        assertEquals("cancelled: approval timed out", out.status());
+        assertEquals(1, count("release_stock"));
+        assertEquals(0, count("charge") + count("refund_charge"));
+    }
+
+    @Test
+    void timeoutScenarioStillShipsWhenApproved() throws Exception {
+        OrderWorkflow wf = start("approval_timeout");
+        waitForStep(wf, "waiting for approval");
+        wf.approve();
+        assertEquals("shipped", result(wf).status());
+    }
+
+    @Test
+    void paceChangesTimingButNeverTheOutcome() {
+        assertEquals("shipped", result(start("happy", 0.01)).status());
+        assertEquals("shipped", result(start("flaky_card", 0.01)).status());
+        assertEquals("cancelled: card declined", result(start("bad_card", 0.01)).status());
+        assertEquals("cancelled: shipping failed", result(start("ship_fails", 0.01)).status());
     }
 }
