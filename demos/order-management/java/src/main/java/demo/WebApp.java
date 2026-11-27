@@ -68,7 +68,8 @@ public class WebApp {
         OrderWorkflow wf = client.newWorkflowStub(OrderWorkflow.class, WorkflowOptions.newBuilder()
             .setTaskQueue(WorkerApp.TASK_QUEUE).setWorkflowId("order-" + orderId)
             .setMemo(Map.of("scenario", body.get("scenario"))).build());
-        WorkflowClient.start(wf::run, new OrderInput(orderId, body.get("address"), body.get("scenario")));
+        WorkflowClient.start(wf::run, new OrderInput(orderId, body.get("address"), body.get("scenario"),
+            Double.parseDouble(body.getOrDefault("pace", "0"))));
         return Map.of("order_id", orderId);
     }
 

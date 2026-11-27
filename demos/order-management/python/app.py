@@ -29,7 +29,7 @@ async def start():
     order_id = uuid.uuid4().hex[:6]
     await client.start_workflow(
         OrderWorkflow.run,
-        OrderInput(order_id, body["address"], body["scenario"]),
+        OrderInput(order_id, body["address"], body["scenario"], float(body.get("pace", 0))),
         id=f"order-{order_id}",
         task_queue=TASK_QUEUE,
         memo={"scenario": body["scenario"]},

@@ -32,8 +32,8 @@ Open http://localhost:5050. The Temporal Web UI is at http://localhost:8233. The
 |---|---|
 | `./run.sh python` / `java` / `mixed` | start everything in Python, in Java, or with `payments` in Java and the rest in Python |
 | `./run.sh status` | show what is running |
-| `./run.sh stop payments` | stop one service (Worker) |
-| `./run.sh start payments java` | start one service, in `python` (the default) or `java` |
+| `./run.sh stop payments` | stop one service (Worker); `stop workers` stops all four |
+| `./run.sh start payments java` | start one service, in `python` (the default) or `java`; `start workers` brings all four back |
 | `./run.sh logs` | show the end of every log |
 | `./run.sh smoke` | place an order for every scenario and check the result, add `--chaos` to also stop and start `payments` |
 | `./run.sh down` | stop everything this script started |
@@ -183,6 +183,10 @@ mvn -q compile exec:java@worker -Dexec.args="payments"    # terminal 6
 
 The red chip needs work waiting for it. With no orders in flight, the server only learns a Worker is gone after about a minute.
 
+## Pace
+
+The Activities pretend to take time, so you can follow what happens. The **Pace** switch on the page picks how long: **Fast** (instant, what the tests use), **Demo** (a happy path takes about 12 seconds) or **Slow** (about 30 seconds). Open `http://localhost:5050/?pace=slow` to start on another pace. The pace is a number in the order input: `0`, `1` or `2.5`. Each Activity waits that many times its base time (`pause` in `activities.py`, `Pace.pause` in Java). The Workflow uses it for the timeout, the wait before a retry and the approval timeout, so the code stays deterministic. A pace changes timing only, never the result.
+
 ## Scenarios
 
 | Pick | What happens | What it teaches | Where to look in the Web UI |
@@ -191,11 +195,12 @@ The red chip needs work waiting for it. With no orders in flight, the server onl
 | Flaky card | the charge fails twice, the Retry Policy makes attempt 3 pass | Temporal retries for you, no retry loop in your code | the `charge` Activity shows 3 attempts |
 | Bad card | non-retryable error, the undo steps run: the refund finds no charge, the reserved stock is released, order cancelled | some errors must not be retried, so earlier steps are undone (Saga), and an undo must be safe to run when there is nothing to undo | `refund_charge` and `release_stock` run after `charge` fails |
 | Needs approval | the Workflow waits for a Signal, an Update can change the address first | a Workflow can wait for a person without using a thread | click Approve, or Change address (a short address is rejected) |
+| Approval times out | like Needs approval, but nobody approves: a Timer fires after a few seconds, the stock is released, order cancelled | a durable Timer can end a wait on its own, and it keeps counting while every Worker is stopped | the countdown on the page, then `release_stock`; the `TimerStarted` and `TimerFired` events |
 | Shipping fails | the card is charged, then one item cannot ship, so the child Workflow fails | a full Saga: undo in reverse order, `refund_charge` then `release_stock` | the order's history, and `ship-<id>` showing Failed |
 
 ## Test
 
-No server is needed for the Java tests. Both run the same eight scenario tests (one per scenario, plus the approval timeout, the address Update and a rejected address). The Java project also has six web app tests (the page, the order, the address Update, and the timeline: steps, undo order, countdown). The Python project also has six tests of the data the page reads (`/timeline`, `/services`, `/orders`), which start a local Temporal server on their own, so the first run takes a few seconds longer.
+No server is needed for the Java tests. Both run the same scenario tests (one per scenario, the approval timeout, the address Update, a rejected address, and a check that pace never changes the result). The Java project also has six web app tests (the page, the order, the address Update, and the timeline: steps, undo order, countdown). The Python project also has six tests of the data the page reads (`/timeline`, `/services`, `/orders`), which start a local Temporal server on their own, so the first run takes a few seconds longer.
 
 ```bash
 cd demos/order-management/python && uv run pytest -q

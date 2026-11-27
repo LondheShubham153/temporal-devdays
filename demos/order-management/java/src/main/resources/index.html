@@ -73,6 +73,15 @@
   .choice small { display: block; color: var(--muted); font-size: 12px; }
   .choice input:checked + span { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); background: var(--strip); }
   .choice input:focus-visible + span { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .pace { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .pace .seg { display: flex; flex: 1; }
+  .pace label { flex: 1; position: relative; cursor: pointer; }
+  .pace input { position: absolute; opacity: 0; }
+  .pace label span { display: block; text-align: center; padding: 5px 4px; border: 1px solid var(--line); margin-left: -1px; color: var(--ink); }
+  .pace label:first-child span { border-radius: 8px 0 0 8px; margin-left: 0; }
+  .pace label:last-child span { border-radius: 0 8px 8px 0; }
+  .pace input:checked + span { border-color: var(--accent); background: var(--strip); font-weight: 600; position: relative; }
+  .pace input:focus-visible + span { outline: 3px solid var(--focus); outline-offset: 2px; }
   .field { display: flex; gap: 6px; }
   input[type=text] { flex: 1; min-width: 0; min-height: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -113,6 +122,9 @@
   .chip.failed { --c: var(--fail); --b: var(--fail-bg); }
   .chip.undo { --c: var(--undo); border-style: dashed; background: repeating-linear-gradient(135deg, var(--undo-bg) 0 6px, transparent 6px 12px); }
   .chip.running .ic, .chip.waiting .ic { animation: pulse 1.4s ease-in-out infinite; }
+  .chip.running { position: relative; overflow: hidden; }
+  .chip.running::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 35%; background: var(--c); animation: sweep 1.6s ease-in-out infinite; }
+  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
   .chip.selected { box-shadow: 0 0 0 2px var(--focus); }
   .items { margin: 0 6px; display: grid; gap: 4px; }
   .items .chip { margin: 0; padding: 3px 7px; cursor: default; }
@@ -138,6 +150,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .chip, .chip .ic { transition: none; animation: none !important; }
+    .chip.running::after { animation: none !important; width: 100%; opacity: .4; }
   }
 </style>
 </head>
@@ -158,6 +171,9 @@
   <section class="panel" aria-labelledby="new">
     <h2 id="new">Place an order</h2>
     <div class="choices" id="scenarios" role="radiogroup" aria-label="Scenario"></div>
+    <div class="pace" role="radiogroup" aria-label="Pace">Pace
+      <div class="seg" id="pace"></div>
+    </div>
     <div class="field"><input type="text" id="address" value="12 Main Street" autocomplete="off" aria-label="Shipping address"></div>
     <button class="primary" id="place">Place order</button>
     <h2>Recent orders</h2>
@@ -216,8 +232,10 @@ const SCENARIOS = [
   ["flaky_card", "Flaky card", "The charge fails twice. Temporal retries it."],
   ["bad_card", "Bad card", "A final error. Undo runs, the refund is a safe no-op."],
   ["approval", "Needs approval", "Waits for a person. A Signal and an Update."],
+  ["approval_timeout", "Approval times out", "Nobody approves. A Timer fires and undo runs."],
   ["ship_fails", "Shipping fails", "A child Workflow fails. Undo runs in reverse."],
 ];
+const PACES = [["0", "Fast", "instant"], ["1", "Demo", "about 12 s"], ["2.5", "Slow", "about 30 s"]];
 const LABEL = { done: "done", running: "running", retrying: "retrying", waiting: "waiting for a Worker", failed: "failed" };
 const TONE = { done: "done", running: "run", retrying: "retry", waiting: "wait", failed: "fail" };
 const $ = (x) => document.getElementById(x);
@@ -225,10 +243,17 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
 const get = async (url) => { const r = await fetch(url); if (!r.ok) throw new Error(url); return r.json(); };
 const short = (l) => (l === "python" ? "py" : "java");
-let id = null, view = null, info = null, services = [], paused = false, lastOk = 0, selected = null;
+let lastLanes = "", id = null, view = null, info = null, services = [], paused = false, lastOk = 0, selected = null;
 
 function icon(name) { return `<svg class="ic" aria-hidden="true"><use href="#i-${name}"/></svg>`; }
 function stepIcon(s) { return s.undo ? "undo" : ["signal", "update", "child"].includes(s.kind) ? s.kind : s.status; }
+const isLive = (s) => s.status === "running" && s.kind !== "signal" && s.kind !== "update";   // gets an elapsed-seconds counter
+function tickElapsed() {
+  document.querySelectorAll("[data-since]").forEach((el) => {
+    const n = Math.floor(Date.now() / 1000 - el.dataset.since);
+    el.textContent = LABEL.running + (n >= 1 ? ` · ${n}s` : "");
+  });
+}
 function meta(s) {
   if (s.status === "retrying") return `attempt ${s.attempt} of ${MAX_ATTEMPTS}`;
   const base = s.undo ? "undo · " + LABEL[s.status] : s.kind === "signal" || s.kind === "update" ? s.kind : LABEL[s.status];
@@ -238,7 +263,7 @@ function chip(s, i) {
   const full = `${s.name}, ${s.service}${s.language ? ", " + s.language : ""}, ${meta(s)}${s.detail ? ": " + s.detail : ""}`;
   const lang = s.language ? ` <span class="lang">${short(s.language)}</span>` : "";
   return `<button class="chip ${s.status}${s.undo ? " undo" : ""}${selected === i ? " selected" : ""}" data-i="${i}" style="grid-column:${LANES.indexOf(s.service) + 1};grid-row:${i + 2}" aria-label="${esc(full)}">`
-    + `${icon(stepIcon(s))}<span class="txt"><span class="nm"><span class="t">${esc(s.name)}</span>${lang}</span><span class="meta" data-svc="${s.service}">${esc(meta(s))}</span></span></button>`;
+    + `${icon(stepIcon(s))}<span class="txt"><span class="nm"><span class="t">${esc(s.name)}</span>${lang}</span><span class="meta" data-svc="${s.service}"${isLive(s) ? ` data-since="${s.since}"` : ""}>${esc(meta(s))}</span></span></button>`;
 }
 function items(list) {
   return list.map((s) => `<span class="chip ${s.status}">${icon(stepIcon(s))}<span class="txt"><span class="nm"><span class="t">${esc(s.item)}</span></span><span class="meta">${esc(meta(s) + (s.status === "failed" && s.detail ? " · " + s.detail : ""))}</span></span></span>`).join("");
@@ -261,7 +286,8 @@ function renderLanes() {
     return `<div class="lane-head${down.has(q) ? " down" : ""}" style="grid-column:${c + 1};grid-row:1"><span class="dot"></span>${q}<small>${sv.language || ""}</small></div>`;
   }).join("");
   const rows = view.steps.map((s, i) => chip(s, i) + (s.kind === "child" ? `<div class="items" style="grid-column:4;grid-row:${i + 2}">${items(s.items)}</div>` : "")).join("");
-  $("lanes").innerHTML = heads + rows;
+  const html = heads + rows;
+  if (html !== lastLanes) { $("lanes").innerHTML = html; lastLanes = html; tickElapsed(); }   // same markup: leave the DOM alone so animations keep running
 }
 
 function narrate() {
@@ -300,6 +326,7 @@ function render() {
 }
 
 function tickCountdown() {
+  tickElapsed();
   const end = view && view.countdown_ends, left = end ? Math.max(0, end - Date.now() / 1000) : 0;
   $("countdown").textContent = end ? `times out in ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, "0")}` : "";
   const age = Math.round((Date.now() - lastOk) / 1000), live = $("live");
@@ -330,15 +357,15 @@ async function loadRecent() {
 }
 
 function open(orderId) {
-  id = orderId; view = null; info = null; selected = null;
+  id = orderId; view = null; lastLanes = ""; info = null; selected = null;
   history.replaceState(null, "", "?order=" + id);
   $("msg").textContent = ""; $("newaddr").value = ""; $("detail").textContent = "Select a step to see its details.";
   pollOrder();
 }
 async function start() {
   $("place").disabled = true;
-  const scenario = document.querySelector("[name=scenario]:checked").value;
-  try { open((await (await post("/start", { scenario, address: $("address").value })).json()).order_id); }
+  const scenario = document.querySelector("[name=scenario]:checked").value, pace = +document.querySelector("[name=pace]:checked").value;
+  try { open((await (await post("/start", { scenario, pace, address: $("address").value })).json()).order_id); }
   finally { $("place").disabled = false; }
   if (matchMedia("(max-width: 900px)").matches) $("live-order").scrollIntoView();   // on a phone the order sits below the form
   loadRecent();
@@ -350,6 +377,9 @@ function setTheme(t) {
 }
 
 $("scenarios").innerHTML = SCENARIOS.map(([v, name, hint], i) => `<label class="choice"><input type="radio" name="scenario" value="${v}"${i === 0 ? " checked" : ""}><span><b>${name}</b><small>${hint}</small></span></label>`).join("");
+const wantedPace = new URLSearchParams(location.search).get("pace");   // ?pace=fast|demo|slow
+const pick = Math.max(0, PACES.findIndex((p) => p[1].toLowerCase() === wantedPace));
+$("pace").innerHTML = PACES.map(([v, name, hint], i) => `<label title="${hint}"><input type="radio" name="pace" value="${v}"${i === (wantedPace ? pick : 1) ? " checked" : ""}><span>${name}</span></label>`).join("");
 $("legend").innerHTML = Object.entries(LABEL).map(([k, v]) => `<span class="pill" style="--c:var(--${TONE[k]})">${v}</span>`).join("") + '<span class="pill" style="border-style:dashed">undo</span>';
 $("addrchips").innerHTML = ["99 Long Road, Pune", "x"].map((a) => `<button class="tag" data-addr="${a}">${a === "x" ? "too short (rejected)" : a}</button>`).join("");
 $("addrchips").onclick = (e) => { const a = e.target.dataset.addr; if (a) { $("newaddr").value = a; $("newaddr").focus(); } };

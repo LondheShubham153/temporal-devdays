@@ -48,9 +48,9 @@ public class Timeline {
         return out;
     }
 
-    static Map<String, Object> step(String kind, String name, String service, String detail, boolean undo) {
+    static Map<String, Object> step(HistoryEvent e, String kind, String name, String service, String detail, boolean undo) {
         return map("kind", kind, "name", name, "service", service, "status", "running", "attempt", 1,
-            "detail", detail, "item", "", "undo", undo, "worker", "", "language", "");
+            "detail", detail, "item", "", "undo", undo, "worker", "", "language", "", "since", e.getEventTime().getSeconds());
     }
 
     record Read(List<Map<String, Object>> steps, Long timer) {}
@@ -64,7 +64,7 @@ public class Timeline {
             switch (e.getEventType()) {
                 case EVENT_TYPE_ACTIVITY_TASK_SCHEDULED -> {
                     var a = e.getActivityTaskScheduledEventAttributes();
-                    Map<String, Object> s = step("activity", a.getActivityType().getName(), a.getTaskQueue().getName(),
+                    Map<String, Object> s = step(e, "activity", a.getActivityType().getName(), a.getTaskQueue().getName(),
                         "", UNDO.contains(a.getActivityType().getName()));
                     if (a.getInput().getPayloadsCount() > 1) {  // ship_item(order_id, item, scenario)
                         s.put("item", a.getInput().getPayloads(1).getData().toStringUtf8().replace("\"", ""));
@@ -87,19 +87,19 @@ public class Timeline {
                     byEvent.get(e.getActivityTaskTimedOutEventAttributes().getScheduledEventId()).putAll(Map.of("status", "failed", "detail", "timed out"));
                 case EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_STARTED -> {
                     var a = e.getChildWorkflowExecutionStartedEventAttributes();
-                    child = step("child", a.getWorkflowType().getName(), "orders", a.getWorkflowExecution().getWorkflowId(), false);
+                    child = step(e, "child", a.getWorkflowType().getName(), "orders", a.getWorkflowExecution().getWorkflowId(), false);
                     steps.add(child);
                 }
                 case EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_COMPLETED -> child.put("status", "done");
                 case EVENT_TYPE_CHILD_WORKFLOW_EXECUTION_FAILED ->
                     child.putAll(Map.of("status", "failed", "detail", "a child step failed for good"));
                 case EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED -> {
-                    Map<String, Object> s = step("signal", e.getWorkflowExecutionSignaledEventAttributes().getSignalName(), "orders", "", false);
+                    Map<String, Object> s = step(e, "signal", e.getWorkflowExecutionSignaledEventAttributes().getSignalName(), "orders", "", false);
                     s.put("status", "done");
                     steps.add(s);
                 }
                 case EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_ACCEPTED -> {
-                    Map<String, Object> s = step("update",
+                    Map<String, Object> s = step(e, "update",
                         e.getWorkflowExecutionUpdateAcceptedEventAttributes().getAcceptedRequest().getInput().getName(), "orders", "", false);
                     s.put("status", "done");
                     steps.add(s);

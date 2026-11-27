@@ -21,10 +21,10 @@ async def env():
             yield env
 
 
-async def start(env, scenario: str, order_id: str = "1"):
+async def start(env, scenario: str, order_id: str = "1", pace: float = 0.0):
     return await env.client.start_workflow(
         OrderWorkflow.run,
-        OrderInput(order_id, "1 Main St, Redwood", scenario),
+        OrderInput(order_id, "1 Main St, Redwood", scenario, pace),
         id=f"order-{order_id}",
         task_queue=TASK_QUEUE,
     )
@@ -107,3 +107,25 @@ async def test_update_with_a_bad_address_is_rejected(env):
     with pytest.raises(WorkflowUpdateFailedError):
         await handle.execute_update(OrderWorkflow.change_address, "x")
     assert (await handle.query(OrderWorkflow.status)).address == "1 Main St, Redwood"
+
+
+async def test_unapproved_order_times_out_in_seconds_in_the_timeout_scenario(env):
+    result = await (await start(env, "approval_timeout")).result()
+    assert result.status == "cancelled: approval timed out"
+    assert "release_stock" in activities.calls
+    assert "charge" not in activities.calls and "refund_charge" not in activities.calls
+
+
+async def test_approval_timeout_scenario_still_ships_when_approved(env):
+    handle = await start(env, "approval_timeout")
+    await wait_for_step(handle, "waiting for approval")
+    await handle.signal(OrderWorkflow.approve)
+    assert (await handle.result()).status == "shipped"
+
+
+async def test_pace_changes_timing_but_never_the_outcome(env):
+    for scenario, expected in [("happy", "shipped"), ("flaky_card", "shipped"), ("bad_card", "cancelled: card declined"),
+                               ("ship_fails", "cancelled: shipping failed")]:
+        activities.calls.clear(); activities.charged.clear()
+        handle = await start(env, scenario, f"p-{scenario}", pace=0.01)
+        assert (await handle.result()).status == expected
