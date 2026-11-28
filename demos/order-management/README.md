@@ -49,6 +49,7 @@ Open http://localhost:5050. The Temporal Web UI is at http://localhost:8233. The
 | Dashed, hatched undo chips in reverse order | the Saga: undo earlier steps when a later one fails |
 | The child Workflow with its three `ship_item` calls | a child Workflow and Activities running in parallel |
 | Approve, Change address, and a countdown | a Signal, an Update that can be rejected, and a Timer |
+| A **Pace** switch, and elapsed seconds on running steps | slow the demo down to talk over it: the same Workflow, only the simulated waits change |
 | Recent orders, and `?order=<id>` in the address bar | every order is a Workflow you can find and reopen |
 
 The page reads its data from three endpoints that both apps offer: `/timeline/<id>` (the Event History and any pending Activity), `/services` (which queues have a Worker, from the Worker identity `python-<service>` or `java-<service>`) and `/orders`. It reads history from Temporal, so it keeps working when a service is stopped.
@@ -118,7 +119,7 @@ sequenceDiagram
 | 1 | the web app starts the order | web app, then Temporal | none | start Workflow |
 | 2 | check stock | inventory | `inventory` | Activity |
 | 3 | reserve stock | inventory | `inventory` | Activity |
-| 4 | wait for approval (**Needs approval** only) | `orders` | none | Workflow waits for a Signal |
+| 4 | wait for approval (**Needs approval** and **Approval times out** only) | `orders` | none | Workflow waits for a Signal |
 | 5 | charge the card | payments | `payments` | Activity |
 | 6 | start the shipment | `orders` | `orders` | child Workflow |
 | 7 | ship the 3 items at the same time | shipping | `shipping` | 3 Activities |
@@ -195,7 +196,7 @@ The Activities pretend to take time, so you can follow what happens. The **Pace*
 | Flaky card | the charge fails twice, the Retry Policy makes attempt 3 pass | Temporal retries for you, no retry loop in your code | the `charge` Activity shows 3 attempts |
 | Bad card | non-retryable error, the undo steps run: the refund finds no charge, the reserved stock is released, order cancelled | some errors must not be retried, so earlier steps are undone (Saga), and an undo must be safe to run when there is nothing to undo | `refund_charge` and `release_stock` run after `charge` fails |
 | Needs approval | the Workflow waits for a Signal, an Update can change the address first | a Workflow can wait for a person without using a thread | click Approve, or Change address (a short address is rejected) |
-| Approval times out | like Needs approval, but nobody approves: a Timer fires after a few seconds, the stock is released, order cancelled | a durable Timer can end a wait on its own, and it keeps counting while every Worker is stopped | the countdown on the page, then `release_stock`; the `TimerStarted` and `TimerFired` events |
+| Approval times out | like Needs approval, but nobody approves: a Timer fires (5 seconds at Fast pace, 20 at Demo pace), the stock is released, order cancelled | a durable Timer can end a wait on its own, and it keeps counting while every Worker is stopped | the countdown on the page, then `release_stock`; the `TimerStarted` and `TimerFired` events |
 | Shipping fails | the card is charged, then one item cannot ship, so the child Workflow fails | a full Saga: undo in reverse order, `refund_charge` then `release_stock` | the order's history, and `ship-<id>` showing Failed |
 
 ## Test
