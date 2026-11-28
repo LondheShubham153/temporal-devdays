@@ -33,7 +33,7 @@ A learn-and-practice resource for Temporal. Each concept has a plain-words expla
 - A recorded `history.json` contains your host name in every `identity` field. Replace it with `1@devdays` before you commit (`sed -E 's/[0-9]+@[^"]+/1@devdays/'`); the checker rejects host names.
 - Never edit a `solution/` folder when you only mean to change the `exercise/` next to it, and the reverse.
 - A README is minimal: goal in two lines, run commands, task checklist, what the check expects, one stretch task. The teaching lives in the concept file.
-- Concept files use these headings: `## The problem`, `## The idea`, `## Picture`, `## Use it when`, `## Don't use it when`, `## Common mistake`, `## Learn more`. Links go to docs.temporal.io and are checked before they are added.
+- Concept files use these headings, in this order: `## The problem`, `## The idea`, `## Picture`, `## How it works`, `## Production use cases`, `## Design decisions`, `## Failure modes`, `## What to measure`, `## Use it when`, `## Don't use it when`, `## Common mistake`, `## Learn more`. `verify_repo.py` checks them. Links go to docs.temporal.io and are checked before they are added.
 
 ## Python
 - Python 3.11+, `uv`, async code, dataclasses for inputs, pytest.

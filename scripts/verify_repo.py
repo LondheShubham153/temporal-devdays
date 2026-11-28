@@ -5,7 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LANGS = ("python", "java")
-SECTIONS = ["## The problem", "## The idea", "## Picture", "## Use it when",
+SECTIONS = ["## The problem", "## The idea", "## Picture", "## How it works", "## Production use cases",
+            "## Design decisions", "## Failure modes", "## What to measure", "## Use it when",
             "## Don't use it when", "## Common mistake", "## Learn more"]
 BANNED = [r"/Users/", r"[\w.+-]+@(gmail|outlook|yahoo|hotmail)\.com", "chu" + "bb", r"MacBook", r"@[\w-]+\.local\b"]
 SKIP_DIRS = {".git", ".venv", "target", "__pycache__", ".pytest_cache", "node_modules"}
